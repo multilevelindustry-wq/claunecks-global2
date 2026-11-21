@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){ return request.auth != null; }
+    function admin(){ return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true; }
+    match /users/{uid} { allow read, write: if signedIn() && request.auth.uid == uid || admin(); match /saved/{listingId} { allow read, write: if signedIn() && request.auth.uid == uid; } }
+    match /publicProfiles/{uid} { allow read: if true; allow create, update: if signedIn() && request.auth.uid == uid; allow delete: if signedIn() && request.auth.uid == uid || admin(); }
+    match /admins/{uid} { allow read: if signedIn() && request.auth.uid == uid || admin(); allow write: if false; }
+    match /listings/{id} {
+      allow read: if resource.data.status == 'published' || (signedIn() && resource.data.ownerUid == request.auth.uid) || admin();
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if admin() || (signedIn() && resource.data.ownerUid == request.auth.uid && request.resource.data.ownerUid == resource.data.ownerUid) || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']) && ((('views' in resource.data) && request.resource.data.views == resource.data.views + 1) || (!('views' in resource.data) && request.resource.data.views == 1))) || (signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes','views']));
+      allow delete: if admin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      match /comments/{commentId} {
+        allow read: if get(/databases/$(database)/documents/listings/$(id)).data.status == 'published' || admin();
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() < 3000;
+        allow update, delete: if admin() || (signedIn() && resource.data.uid == request.auth.uid);
+      }
+    }
+    match /reports/{id} { allow create: if signedIn(); allow read, update, delete: if admin(); }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
